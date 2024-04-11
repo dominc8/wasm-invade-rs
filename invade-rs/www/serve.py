@@ -9,6 +9,13 @@ Handler = http.server.SimpleHTTPRequestHandler
 
 Handler.extensions_map[".wasm"] = "application/wasm"
 
+keep_running = True
+
 with socketserver.TCPServer(("", PORT), Handler) as httpd:
     print("serving at port", PORT)
-    httpd.serve_forever()
+
+    while keep_running:
+        try:
+            httpd.handle_request()
+        except KeyboardInterrupt:
+            keep_running = False;
