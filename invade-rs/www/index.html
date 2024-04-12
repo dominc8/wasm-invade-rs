@@ -35,6 +35,9 @@
         );
 
         const ctx = canvas.getContext("2d");
+        //let previous_timestamp = document.timeline.currentTime;
+        //const tick_value_in_ms = 50;
+        //let current_tick_value = tick_value_in_ms;
 
         const render = () => {
             instance.exports.js_game_tick(keyPressed);
@@ -43,6 +46,7 @@
             requestAnimationFrame(render);
         };
 
+        instance.exports.js_game_init();
         render();
         window.addEventListener('keydown', check, false);
       }

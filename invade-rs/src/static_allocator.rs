@@ -1,4 +1,5 @@
 use std::mem;
+use std::marker::PhantomData;
 
 pub fn static_alloc<T: Sized>() -> &'static mut T {
     unsafe { STATIC_ALLOCATOR.alloc_obj() }
@@ -82,9 +83,6 @@ impl StaticAllocator {
         if let Some(bm) = self.used_bitmap.get_mut(idx) {
             let freeing_bm = !(((1 << size) - 1) << bit0);
             *bm &= freeing_bm;
-        }
-        else {
-            loop {}
         }
     }
 
@@ -202,11 +200,38 @@ impl<T> SVector<T> {
             loop {}
         }
     }
+
+    pub fn iter(&self) -> Iter<T> {
+        Iter { curr_idx: 0, svec: self}
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn reset(&mut self) {
+        self.size = 0;
+    }
 }
 
 impl<T> Drop for SVector<T> {
     fn drop(&mut self) {
         static_dealloc_mult(self.elements, self.capacity);
+    }
+}
+
+pub struct Iter<'a, T> {
+    curr_idx: u32,
+    svec: &'a SVector<T>
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.curr_idx;
+        self.curr_idx += 1;
+        self.svec.get(idx as usize)
     }
 }
 
