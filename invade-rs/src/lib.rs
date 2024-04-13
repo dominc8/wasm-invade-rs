@@ -10,6 +10,11 @@ const BUFFER_SIZE: usize = WIDTH * MULT * HEIGHT * MULT;
 #[no_mangle]
 static mut BUFFER: [u32; BUFFER_SIZE] = [0; BUFFER_SIZE];
 
+struct Bitmap2D {
+    width: u32,
+    height: u32,
+    bitmap: &'static [u16]
+}
 
 /*
  *       OO     
@@ -20,10 +25,41 @@ static mut BUFFER: [u32; BUFFER_SIZE] = [0; BUFFER_SIZE];
  * OOOOOOOOOOOOOO
  * OOOOOOOOOOOOOO
  * */
+const PLAYER_BITMAP: Bitmap2D = Bitmap2D { width: 14, height: 7,
+bitmap: &[
+    0b0000001100000000,
+    0b0000011110000000,
+    0b0000011110000000,
+    0b0111111111111000,
+    0b1111111111111100,
+    0b1111111111111100,
+    0b1111111111111100,
+] };
+
+/*
+ *   O      O  
+ *    O    O   
+ *   OOOOOOOO  
+ *  OO OOOO OO 
+ * OOOOOOOOOOOO
+ * O OOOOOOOO O
+ * O O      O O
+ *    OO  OO   
+ * */
+const ENEMY_BITMAP: Bitmap2D = Bitmap2D { width: 12, height: 8,
+bitmap: &[
+    0b0010000001000000,
+    0b0001000010000000,
+    0b0011111111000000,
+    0b0110111101100000,
+    0b1111111111110000,
+    0b1011111111010000,
+    0b1010000001010000,
+    0b0001100110000000,
+] };
+
 struct Player {
     pos: i32,
-    width: u32,
-    height: u32,
     color: u32,
 }
 
@@ -36,16 +72,6 @@ enum Tile {
 const DEFAULT_TILE: Tile = Tile::Background;
 const ENEMY_SPEED: u8 = 1;
 
-/*
- *   O      O  
- *    O    O   
- *   OOOOOOOO  
- *  OO OOOO OO 
- * OOOOOOOOOOOO
- * O OOOOOOOO O
- * O O      O O
- *    OO  OO   
- * */
 struct Enemy {
     x: u8,
     y: u8,
@@ -102,7 +128,7 @@ pub unsafe extern fn js_game_init() {
     let game = static_allocator::static_alloc::<Game>();
     game.default_color = 0xFF_FF_FF_FF;
     game.game_state = GameState::StartScreen;
-    game.player = Player { pos: (WIDTH as i32)/2, width: 14, height: 7, color: 0xFF_00_00_FF };
+    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF };
     game.enemies = static_allocator::SVector::new(16);
     game.bullets = static_allocator::SVector::new(128);
     game.moving_right = true;
@@ -243,107 +269,43 @@ impl Game<'_> {
 impl Player {
     fn try_move(&mut self, diff: i32) {
         let new_pos = self.pos + diff;
-        if new_pos >= (self.width as i32 / 2) && new_pos <= (WIDTH as i32 - (self.width as i32) / 2) {
+        let width = PLAYER_BITMAP.width as i32;
+        if new_pos >= (width / 2) && new_pos <= (WIDTH as i32 - width / 2) {
             self.pos = new_pos;
         }
     }
 
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
-        static OFFSETS: [u32; 7] = [6, 5, 5, 1, 0, 0, 0];
-        static WIDTHS: [u32; 7] = [2, 4, 4, 12, 14, 14, 14];
-        let x0 = self.pos as u32 - self.width/2;
-        let y_end = HEIGHT as u32;
-        let y_start = y_end - self.height;
-        for y in y_start..y_end {
-            let arr_idx = y - y_start;
-            let offset = OFFSETS.get(arr_idx as usize).unwrap_or(&0);
-            let width = WIDTHS.get(arr_idx as usize).unwrap_or(&0);
-
+        let x0 = self.pos as u32;
+        let mut y = HEIGHT as u32 - PLAYER_BITMAP.height;
+        for row in PLAYER_BITMAP.bitmap.iter() {
+            // Player's bitmap is contiguous so I can do this
+            let offset = row.leading_zeros();
+            let length = row.count_ones();
+            
             let start_pos = (y * (WIDTH as u32) + x0 + offset) as usize;
-            if let Some(x) = buffer.get_mut(start_pos..start_pos+*width as usize) {
+            if let Some(x) = buffer.get_mut(start_pos..start_pos+length as usize) {
                 x.fill(Tile::Player);
             }
+            y += 1;
         }
     }
 }
 
 impl Enemy {
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
-        static ENEMY_WIDTH: u32 = 12;
-        static ENEMY_HEIGHT: u32 = 8;
-        let x0 = self.x as u32 - ENEMY_WIDTH/2;
-        let y_start = self.y as u32 - ENEMY_HEIGHT/2;
-
         let enemy_tile = Tile::Enemy(self.health);
-
-        let row_start = (y_start * (WIDTH as u32) + x0) as usize;
-        if let Some(x) = buffer.get_mut(row_start + 2 as usize) {
-            *x = enemy_tile;
-        }
-        if let Some(x) = buffer.get_mut(row_start + 9 as usize) {
-            *x = enemy_tile;
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start + 3 as usize) {
-            *x = enemy_tile;
-        }
-        if let Some(x) = buffer.get_mut(row_start + 8 as usize) {
-            *x = enemy_tile;
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start+2..row_start+10 as usize) {
-            x.fill(enemy_tile);
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start+1..row_start+3 as usize) {
-            x.fill(enemy_tile);
-        }
-        if let Some(x) = buffer.get_mut(row_start+4..row_start+8 as usize) {
-            x.fill(enemy_tile);
-        }
-        if let Some(x) = buffer.get_mut(row_start+9..row_start+11 as usize) {
-            x.fill(enemy_tile);
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start..row_start+12 as usize) {
-            x.fill(enemy_tile);
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start as usize) {
-            *x = enemy_tile;
-        }
-        if let Some(x) = buffer.get_mut(row_start+2..row_start+10 as usize) {
-            x.fill(enemy_tile);
-        }
-        if let Some(x) = buffer.get_mut(row_start+11 as usize) {
-            *x = enemy_tile;
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start as usize) {
-            *x = enemy_tile;
-        }
-        if let Some(x) = buffer.get_mut(row_start+2 as usize) {
-            *x = enemy_tile;
-        }
-        if let Some(x) = buffer.get_mut(row_start+9 as usize) {
-            *x = enemy_tile;
-        }
-        if let Some(x) = buffer.get_mut(row_start+11 as usize) {
-            *x = enemy_tile;
-        }
-
-        let row_start = row_start + WIDTH;
-        if let Some(x) = buffer.get_mut(row_start+3..row_start+5 as usize) {
-            x.fill(enemy_tile);
-        }
-        if let Some(x) = buffer.get_mut(row_start+7..row_start+9 as usize) {
-            x.fill(enemy_tile);
+        let x0 = self.x as u32 - ENEMY_BITMAP.width / 2;
+        let y0 = self.y as u32 - ENEMY_BITMAP.height / 2;
+        for (row_idx, &row) in ENEMY_BITMAP.bitmap.iter().enumerate() {
+            let row_start = ((y0 + row_idx as u32) * (WIDTH as u32) + x0) as usize;
+            for bit_idx in 0..15 {
+                if row & (1 << (16 - bit_idx)) != 0 {
+                    if let Some(x) = buffer.get_mut(row_start + bit_idx) {
+                        *x = enemy_tile;
+                    }
+                }
+            }
         }
     }
 }
