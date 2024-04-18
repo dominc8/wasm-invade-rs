@@ -3,9 +3,11 @@ mod static_allocator;
 use std::cell::OnceCell;
 
 const WIDTH: usize = 200;
-const HEIGHT: usize = 200;
-const MULT: usize = 3;
+const HEIGHT: usize = 150;
+const MULT: usize = 6;
 const BUFFER_SIZE: usize = WIDTH * MULT * HEIGHT * MULT;
+const MAX_BULLETS: usize = 128;
+const MAX_ENEMIES: usize = 16;
 
 #[no_mangle]
 static mut BUFFER: [u32; BUFFER_SIZE] = [0; BUFFER_SIZE];
@@ -61,13 +63,15 @@ bitmap: &[
 struct Player {
     pos: i32,
     color: u32,
+    health: i32,
 }
 
 #[derive(Clone, Copy)]
 enum Tile {
     Background,
     Player,
-    Enemy(u8),
+    Bullet,
+    Enemy(i8),
 }
 const DEFAULT_TILE: Tile = Tile::Background;
 const ENEMY_SPEED: u8 = 1;
@@ -75,13 +79,14 @@ const ENEMY_SPEED: u8 = 1;
 struct Enemy {
     x: u8,
     y: u8,
-    health: u8,
+    health: i8,
 }
 
 struct Bullet {
     x: u8,
     y: u8,
-    speed: u8
+    speed: i8,
+    alive: bool,
 }
 
 #[derive(Eq, PartialEq)]
@@ -107,6 +112,7 @@ impl KeyEvent {
 
 struct Game<'a> {
     default_color: u32,
+    random_seed: u32,
     game_state: GameState,
     player: Player,
     enemies: static_allocator::SVector<Enemy>,
@@ -128,9 +134,9 @@ pub unsafe extern fn js_game_init() {
     let game = static_allocator::static_alloc::<Game>();
     game.default_color = 0xFF_FF_FF_FF;
     game.game_state = GameState::StartScreen;
-    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF };
-    game.enemies = static_allocator::SVector::new(16);
-    game.bullets = static_allocator::SVector::new(128);
+    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: 3 };
+    game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
+    game.bullets = static_allocator::SVector::new(MAX_BULLETS);
     game.moving_right = true;
     game.buffer = &mut GAMEBUFFER;
 
@@ -156,8 +162,8 @@ pub unsafe extern fn js_game_tick(key_event_flags: u32) {
                 game.update_buffer();
                 game.render(&mut BUFFER);
             },
-            GameState::EndScreen(_) => {
-                game.draw_end_screen(&mut BUFFER);
+            GameState::EndScreen(has_won) => {
+                game.draw_end_screen(has_won, &mut BUFFER);
                 if key_event.pressed_space() {
                     game.game_state = GameState::StartScreen;
                 }
@@ -170,12 +176,13 @@ pub unsafe extern fn js_game_tick(key_event_flags: u32) {
 impl Game<'_> {
     fn reset_level(&mut self) {
         self.player.pos = (WIDTH as i32)/2;
+        self.player.health = 3;
         self.enemies.reset();
         self.bullets.reset();
         self.moving_right = true;
-        self.enemies.push_back(Enemy { x: 20, y: 20, health: 10 });
-        self.enemies.push_back(Enemy { x: 60, y: 20, health: 10 });
-        self.enemies.push_back(Enemy { x: 40, y: 40, health: 10 });
+        self.enemies.push_back(Enemy { x: 20, y: 20, health: 2 });
+        self.enemies.push_back(Enemy { x: 60, y: 20, health: 2 });
+        self.enemies.push_back(Enemy { x: 40, y: 40, health: 2 });
     }
 
     fn tick(&mut self, key_event: KeyEvent) {
@@ -187,7 +194,11 @@ impl Game<'_> {
 
         self.player.try_move(player_move_diff * MOVE_SIZE);
         if key_event.pressed_space() {
-            self.player.color ^= 0x00_FF_00_00;
+            self.bullets.push_back(Bullet { x: self.player.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8, speed: -1, alive: true });
+        }
+        let shooting_enemy_idx = self.get_random_u32() % (MAX_ENEMIES as u32 * 4);
+        if let Some(enemy) = self.enemies.get(shooting_enemy_idx as usize) {
+            self.bullets.push_back(Bullet { x: enemy.x, y: enemy.y + (1 + ENEMY_BITMAP.height/2) as u8, speed: 1, alive: true });
         }
 
         let mut enemy_idx = 0;
@@ -216,7 +227,7 @@ impl Game<'_> {
                 if enemy.y > head_y {
                     head_y = enemy.y;
                 }
-                enemy.y += ENEMY_SPEED;
+                enemy.y += 4 * ENEMY_SPEED;
                 enemy_idx += 1;
             }
 
@@ -224,6 +235,11 @@ impl Game<'_> {
                 // YOU LOSE!
                 self.game_state = GameState::EndScreen(false);
             }
+        }
+
+        if self.enemies.size() == 0 {
+            // YOU WIN!
+            self.game_state = GameState::EndScreen(true);
         }
     }
 
@@ -233,6 +249,55 @@ impl Game<'_> {
         for enemy in self.enemies.iter() {
             enemy.update(self.buffer);
         }
+        let mut idx = 0;
+        while let Some(bullet) = self.bullets.get_mut(idx) {
+            bullet.update(self.buffer);
+            idx += 1;
+        }
+        let mut idx = (self.bullets.size() - 1) as isize;
+        while idx >= 0 {
+            if let Some(bullet) = self.bullets.get(idx as usize) {
+                if !bullet.alive {
+                    let player_x_dist = self.player.pos as i32 - bullet.x as i32;
+                    let (player_x_dist, _) = player_x_dist.overflowing_abs();
+                    if player_x_dist <= (PLAYER_BITMAP.width as i32/2) && bullet.speed > 0 {
+                        self.player.health -= 1;
+                        self.player.color ^= 0x00_FF_00_00;
+                    } else {
+                        for (enemy_idx, enemy) in self.enemies.iter().enumerate() {
+                            let x_dist = enemy.x as i32 - bullet.x as i32;
+                            let (x_dist, _) = x_dist.overflowing_abs();
+                            let y_dist = enemy.y as i32 - bullet.y as i32;
+                            let (y_dist, _) = y_dist.overflowing_abs();
+                            if x_dist <= ENEMY_BITMAP.width as i32/2 && y_dist <= ENEMY_BITMAP.height as i32/2 {
+                                if let Some(enemy) = self.enemies.get_mut(enemy_idx) {
+                                    enemy.health -= 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    self.bullets.remove(idx as usize);
+                }
+            }
+            idx -= 1;
+        }
+
+        let mut idx = (self.enemies.size() - 1) as isize;
+        while idx >= 0 {
+            if let Some(enemy) = self.enemies.get(idx as usize) {
+                if enemy.health <=0 {
+                    self.enemies.remove(idx as usize);
+                }
+            }
+            idx -= 1;
+        }
+
+        if self.player.health <= 0 {
+            // YOU LOSE!
+            self.game_state = GameState::EndScreen(false);
+        }
+
     }
 
     fn render(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
@@ -240,7 +305,8 @@ impl Game<'_> {
             let color = match tile {
                 Tile::Background => self.default_color,
                 Tile::Player => self.player.color,
-                Tile::Enemy(val) => 0xFF_00_00_00 | ((*val as u32) << 24) | ((*val as u32) << 16) | ((*val as u32) << 8),
+                Tile::Bullet => 0xFF_80_80_80,
+                Tile::Enemy(val) => 0xFF_00_00_00 | ((*val as u32) << 22) | ((*val as u32) << 14) | ((*val as u32) << 6),
             };
             let buffer_row = idx / WIDTH;
             let buffer_col = idx % WIDTH;
@@ -256,13 +322,21 @@ impl Game<'_> {
     }
 
     fn draw_start_screen(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
-        const START_SCREEN_COLOR: u32 = 0xFF_00_88_00;
+        const START_SCREEN_COLOR: u32 = 0xFF_88_00_00;
         js_buffer.fill(START_SCREEN_COLOR);
     }
 
-    fn draw_end_screen(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
-        const END_SCREEN_COLOR: u32 = 0xFF_00_FF_00;
-        js_buffer.fill(END_SCREEN_COLOR);
+    fn draw_end_screen(&self, has_won: bool, js_buffer: &mut [u32; BUFFER_SIZE]) {
+        const END_SCREEN_WINNER_COLOR: u32 = 0xFF_00_88_00;
+        const END_SCREEN_LOSER_COLOR: u32 = 0xFF_00_00_88;
+        let color = if has_won { END_SCREEN_WINNER_COLOR } else { END_SCREEN_LOSER_COLOR };
+        js_buffer.fill(color);
+    }
+
+    fn get_random_u32(&mut self) -> u32 {
+        self.random_seed = self.random_seed.wrapping_mul(1664525);
+        self.random_seed = self.random_seed.wrapping_add(1013904223);
+        self.random_seed
     }
 }
 
@@ -276,7 +350,7 @@ impl Player {
     }
 
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
-        let x0 = self.pos as u32;
+        let x0 = self.pos as u32 - PLAYER_BITMAP.width / 2;
         let mut y = HEIGHT as u32 - PLAYER_BITMAP.height;
         for row in PLAYER_BITMAP.bitmap.iter() {
             // Player's bitmap is contiguous so I can do this
@@ -305,6 +379,23 @@ impl Enemy {
                         *x = enemy_tile;
                     }
                 }
+            }
+        }
+    }
+}
+
+impl Bullet {
+    fn update(&mut self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
+        if self.y == 0 || self.y == HEIGHT as u8 {
+            self.alive = false;
+            return;
+        }
+        self.y = (self.y as i16 + self.speed as i16) as u8;
+        let pos = self.y as usize * WIDTH + self.x as usize;
+        if let Some(x) = buffer.get_mut(pos) {
+            match *x {
+                Tile::Background | Tile::Bullet => *x = Tile::Bullet,
+                Tile::Player | Tile::Enemy(_) =>  self.alive = false,
             }
         }
     }
