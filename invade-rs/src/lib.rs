@@ -66,11 +66,12 @@ struct Player {
     health: i32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Tile {
     Background,
     Player,
     Bullet,
+    Obstacle,
     Enemy(i8),
 }
 const DEFAULT_TILE: Tile = Tile::Background;
@@ -82,11 +83,18 @@ struct Enemy {
     health: i8,
 }
 
+enum BulletStatus {
+    Alive,
+    HitPlayer,
+    HitEnemy,
+    HitObstacle
+}
+
 struct Bullet {
     x: u8,
     y: u8,
     speed: i8,
-    alive: bool,
+    status: BulletStatus,
 }
 
 #[derive(Eq, PartialEq)]
@@ -183,6 +191,28 @@ impl Game<'_> {
         self.enemies.push_back(Enemy { x: 20, y: 20, health: 2 });
         self.enemies.push_back(Enemy { x: 60, y: 20, health: 2 });
         self.enemies.push_back(Enemy { x: 40, y: 40, health: 2 });
+        self.buffer.fill(Tile::Background);
+
+        self.buffer_fill_obstacles();
+    }
+
+    fn buffer_fill_obstacles(&mut self) {
+        let y0 = HEIGHT * 5 / 8;
+        let width = 4;
+        let height = 2;
+        let spacing = width * 3;
+        let x_step = width + spacing;
+        let n_obstacle = WIDTH / x_step;
+        let x0_offset = (WIDTH - (n_obstacle * x_step - spacing)) / 2;
+        for y in y0..y0+height {
+            let x0 = y * WIDTH + x0_offset;
+            for obstacle_idx in 0..n_obstacle {
+                let x = x0 + obstacle_idx * x_step;
+                if let Some(buf) = self.buffer.get_mut(x..x+width) {
+                    buf.fill(Tile::Obstacle);
+                }
+            }
+        }
     }
 
     fn tick(&mut self, key_event: KeyEvent) {
@@ -194,11 +224,11 @@ impl Game<'_> {
 
         self.player.try_move(player_move_diff * MOVE_SIZE);
         if key_event.pressed_space() {
-            self.bullets.push_back(Bullet { x: self.player.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8, speed: -1, alive: true });
+            self.bullets.push_back(Bullet { x: self.player.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8, speed: -1, status: BulletStatus::Alive });
         }
         let shooting_enemy_idx = self.get_random_u32() % (MAX_ENEMIES as u32 * 4);
         if let Some(enemy) = self.enemies.get(shooting_enemy_idx as usize) {
-            self.bullets.push_back(Bullet { x: enemy.x, y: enemy.y + (1 + ENEMY_BITMAP.height/2) as u8, speed: 1, alive: true });
+            self.bullets.push_back(Bullet { x: enemy.x, y: enemy.y + (1 + ENEMY_BITMAP.height/2) as u8, speed: 1, status: BulletStatus::Alive });
         }
 
         let mut enemy_idx = 0;
@@ -244,7 +274,11 @@ impl Game<'_> {
     }
 
     fn update_buffer(&mut self) {
-        self.buffer.fill(Tile::Background);
+        for it in self.buffer.iter_mut() {
+            if *it != Tile::Obstacle {
+                *it = Tile::Background
+            }
+        }
         self.player.update(self.buffer);
         for enemy in self.enemies.iter() {
             enemy.update(self.buffer);
@@ -257,13 +291,12 @@ impl Game<'_> {
         let mut idx = (self.bullets.size() - 1) as isize;
         while idx >= 0 {
             if let Some(bullet) = self.bullets.get(idx as usize) {
-                if !bullet.alive {
-                    let player_x_dist = self.player.pos as i32 - bullet.x as i32;
-                    let (player_x_dist, _) = player_x_dist.overflowing_abs();
-                    if player_x_dist <= (PLAYER_BITMAP.width as i32/2) && bullet.speed > 0 {
+                match bullet.status {
+                    BulletStatus::HitPlayer => {
                         self.player.health -= 1;
                         self.player.color ^= 0x00_FF_00_00;
-                    } else {
+                    },
+                    BulletStatus::HitEnemy => {
                         for (enemy_idx, enemy) in self.enemies.iter().enumerate() {
                             let x_dist = enemy.x as i32 - bullet.x as i32;
                             let (x_dist, _) = x_dist.overflowing_abs();
@@ -276,8 +309,12 @@ impl Game<'_> {
                                 }
                             }
                         }
-                    }
-                    self.bullets.remove(idx as usize);
+                    },
+                    BulletStatus::Alive | BulletStatus::HitObstacle => (),
+                }
+                match bullet.status {
+                    BulletStatus::Alive => (),
+                    _ => self.bullets.remove(idx as usize),
                 }
             }
             idx -= 1;
@@ -306,6 +343,7 @@ impl Game<'_> {
                 Tile::Background => self.default_color,
                 Tile::Player => self.player.color,
                 Tile::Bullet => 0xFF_80_80_80,
+                Tile::Obstacle => 0xFF_E0_E0_E0,
                 Tile::Enemy(val) => 0xFF_00_00_00 | ((*val as u32) << 22) | ((*val as u32) << 14) | ((*val as u32) << 6),
             };
             let buffer_row = idx / WIDTH;
@@ -387,7 +425,7 @@ impl Enemy {
 impl Bullet {
     fn update(&mut self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
         if self.y == 0 || self.y == HEIGHT as u8 {
-            self.alive = false;
+            self.status = BulletStatus::HitObstacle;
             return;
         }
         self.y = (self.y as i16 + self.speed as i16) as u8;
@@ -395,7 +433,19 @@ impl Bullet {
         if let Some(x) = buffer.get_mut(pos) {
             match *x {
                 Tile::Background | Tile::Bullet => *x = Tile::Bullet,
-                Tile::Player | Tile::Enemy(_) =>  self.alive = false,
+                Tile::Player => self.status = BulletStatus::HitPlayer,
+                Tile::Enemy(_) => {
+                    if self.speed > 0 {
+                        // Enemy hit enemy
+                        self.status = BulletStatus::HitObstacle;
+                    } else {
+                        self.status = BulletStatus::HitEnemy;
+                    }
+                },
+                Tile::Obstacle => {
+                    *x = Tile::Background;
+                    self.status = BulletStatus::HitObstacle;
+                },
             }
         }
     }
