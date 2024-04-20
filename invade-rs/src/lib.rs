@@ -64,6 +64,7 @@ struct Player {
     pos: i32,
     color: u32,
     health: i32,
+    last_shot_in_ticks: u32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -142,7 +143,7 @@ pub unsafe extern fn js_game_init() {
     let game = static_allocator::static_alloc::<Game>();
     game.default_color = 0xFF_FF_FF_FF;
     game.game_state = GameState::StartScreen;
-    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: 3 };
+    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: 3, last_shot_in_ticks: 0 };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
     game.moving_right = true;
@@ -183,16 +184,23 @@ pub unsafe extern fn js_game_tick(key_event_flags: u32) {
 
 impl Game<'_> {
     fn reset_level(&mut self) {
-        self.player.pos = (WIDTH as i32)/2;
-        self.player.health = 3;
+        self.player.reset();
         self.enemies.reset();
         self.bullets.reset();
         self.moving_right = true;
-        self.enemies.push_back(Enemy { x: 20, y: 20, health: 2 });
-        self.enemies.push_back(Enemy { x: 60, y: 20, health: 2 });
-        self.enemies.push_back(Enemy { x: 40, y: 40, health: 2 });
-        self.buffer.fill(Tile::Background);
 
+        let enemy_step = 20;
+        let n_enemy_in_row = WIDTH / 2 / enemy_step;
+        let n_enemy_rows = 3;
+        for row_idx in 0..n_enemy_rows {
+            let y = (enemy_step * (row_idx + 1)) as u8;
+            for col_idx in 0..n_enemy_in_row {
+                let x = (enemy_step / 2 + col_idx * enemy_step) as u8;
+                self.enemies.push_back(Enemy { x, y, health: 2 });
+            }
+        }
+
+        self.buffer.fill(Tile::Background);
         self.buffer_fill_obstacles();
     }
 
@@ -222,9 +230,12 @@ impl Game<'_> {
         else if key_event.pressed_right() { 1 }
         else {0};
 
+        self.player.tick();
         self.player.try_move(player_move_diff * MOVE_SIZE);
         if key_event.pressed_space() {
-            self.bullets.push_back(Bullet { x: self.player.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8, speed: -1, status: BulletStatus::Alive });
+            if let Some(bullet) = self.player.try_shoot() {
+                self.bullets.push_back(bullet);
+            }
         }
         let shooting_enemy_idx = self.get_random_u32() % (MAX_ENEMIES as u32 * 4);
         if let Some(enemy) = self.enemies.get(shooting_enemy_idx as usize) {
@@ -261,7 +272,7 @@ impl Game<'_> {
                 enemy_idx += 1;
             }
 
-            if head_y > HEIGHT as u8 - 40 {
+            if head_y >= HEIGHT as u8 - PLAYER_BITMAP.height as u8 {
                 // YOU LOSE!
                 self.game_state = GameState::EndScreen(false);
             }
@@ -379,12 +390,31 @@ impl Game<'_> {
 }
 
 impl Player {
+    fn reset(&mut self) {
+        self.pos = (WIDTH as i32)/2;
+        self.health = 3;
+        self.last_shot_in_ticks = 0;
+    }
+
+    fn tick(&mut self) {
+        self.last_shot_in_ticks += 1;
+    }
+
     fn try_move(&mut self, diff: i32) {
         let new_pos = self.pos + diff;
         let width = PLAYER_BITMAP.width as i32;
         if new_pos >= (width / 2) && new_pos <= (WIDTH as i32 - width / 2) {
             self.pos = new_pos;
         }
+    }
+
+    fn try_shoot(&mut self) -> Option<Bullet> {
+        const SHOT_COOLDOWN: u32 = 30;
+        if self.last_shot_in_ticks < SHOT_COOLDOWN {
+            return None;
+        }
+        self.last_shot_in_ticks = 0;
+        return Some(Bullet { x: self.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8, speed: -1, status: BulletStatus::Alive })
     }
 
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
