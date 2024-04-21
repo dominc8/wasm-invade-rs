@@ -2,12 +2,14 @@ mod static_allocator;
 
 use std::cell::OnceCell;
 
+const STATUS_BAR_HEIGHT: usize = 10;
 const WIDTH: usize = 200;
 const HEIGHT: usize = 150;
 const MULT: usize = 6;
-const BUFFER_SIZE: usize = WIDTH * MULT * HEIGHT * MULT;
+const BUFFER_SIZE: usize = WIDTH * MULT * (HEIGHT + STATUS_BAR_HEIGHT) * MULT;
 const MAX_BULLETS: usize = 128;
 const MAX_ENEMIES: usize = 16;
+const MAX_PLAYER_HEALTH: i32 = 3;
 
 #[no_mangle]
 static mut BUFFER: [u32; BUFFER_SIZE] = [0; BUFFER_SIZE];
@@ -143,7 +145,7 @@ pub unsafe extern fn js_game_init() {
     let game = static_allocator::static_alloc::<Game>();
     game.default_color = 0xFF_FF_FF_FF;
     game.game_state = GameState::StartScreen;
-    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: 3, last_shot_in_ticks: 0 };
+    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH, last_shot_in_ticks: 0 };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
     game.moving_right = true;
@@ -366,6 +368,26 @@ impl Game<'_> {
                         *x = color;
                     }
                 }
+            }
+        }
+        self.render_status_bar(js_buffer);
+    }
+
+    fn render_status_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
+        let health_color = 0xFF_10_80_10;
+        let row_width = WIDTH * MULT;
+        let health_width = row_width * self.player.health as usize / MAX_PLAYER_HEALTH as usize;
+
+        let status_bar_start = HEIGHT * MULT * WIDTH * MULT;
+        let status_bar_end = status_bar_start + STATUS_BAR_HEIGHT * MULT * WIDTH * MULT;
+        if let Some(x) = js_buffer.get_mut(status_bar_start..status_bar_end) {
+            x.fill(0xFF_10_10_80);
+        }
+
+        for row in (HEIGHT * MULT)..((HEIGHT + STATUS_BAR_HEIGHT) * MULT) {
+            let row_start = row * row_width;
+            if let Some(x) = js_buffer.get_mut(row_start..row_start+health_width) {
+                x.fill(health_color);
             }
         }
     }

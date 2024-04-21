@@ -17,8 +17,9 @@
           fetch("./invade_rs.wasm")
         );
 
-        const width = 1200;
-        const height = 900;
+        const mult = 6;
+        const width = 200 * mult;
+        const height = (150 + 10) * mult;
 
         const canvas = document.getElementById("game-canvas");
         canvas.width = width;
