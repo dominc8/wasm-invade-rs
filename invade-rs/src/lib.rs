@@ -165,6 +165,7 @@ pub unsafe extern fn js_game_tick(key_event_flags: u32) {
                 game.draw_start_screen(&mut BUFFER);
                 if key_event.pressed_space() {
                     game.reset_level();
+                    BUFFER.fill(0xFF_FF_FF_FF);
                     game.game_state = GameState::Playing;
                 }
             },
@@ -307,7 +308,6 @@ impl Game<'_> {
                 match bullet.status {
                     BulletStatus::HitPlayer => {
                         self.player.health -= 1;
-                        self.player.color ^= 0x00_FF_00_00;
                     },
                     BulletStatus::HitEnemy => {
                         for (enemy_idx, enemy) in self.enemies.iter().enumerate() {
@@ -373,23 +373,68 @@ impl Game<'_> {
         self.render_status_bar(js_buffer);
     }
 
-    fn render_status_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
-        let health_color = 0xFF_10_80_10;
-        let row_width = WIDTH * MULT;
-        let health_width = row_width * self.player.health as usize / MAX_PLAYER_HEALTH as usize;
+    fn render_health_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
+        const TXT_COLOR: u32 = 0xFF_00_00_00;
+        const BM: Bitmap2D = Bitmap2D { width: 11, height: 5,
+        bitmap: &[
+            0b1001011110000000,
+            0b1001010010000000,
+            0b1111011110100000,
+            0b1001010000000000,
+            0b1001010000100000,
+        ] };
 
-        let status_bar_start = HEIGHT * MULT * WIDTH * MULT;
-        let status_bar_end = status_bar_start + STATUS_BAR_HEIGHT * MULT * WIDTH * MULT;
-        if let Some(x) = js_buffer.get_mut(status_bar_start..status_bar_end) {
-            x.fill(0xFF_10_10_80);
-        }
+        let health_string_start = (HEIGHT + 1) * MULT * WIDTH * MULT;
 
-        for row in (HEIGHT * MULT)..((HEIGHT + STATUS_BAR_HEIGHT) * MULT) {
-            let row_start = row * row_width;
-            if let Some(x) = js_buffer.get_mut(row_start..row_start+health_width) {
-                x.fill(health_color);
+        for (row_idx, &row) in BM.bitmap.iter().enumerate() {
+            let buffer_start = health_string_start + row_idx * WIDTH * MULT * MULT;
+            for bit_idx in 0..16 {
+                if row & (1 << (16 - bit_idx)) != 0 {
+                    let ind0 = buffer_start + bit_idx*MULT;
+                    for i in 0..MULT {
+                        let ind0 = ind0 + i*WIDTH*MULT;
+                        if let Some(x) = js_buffer.get_mut(ind0..ind0+MULT) {
+                            x.fill(TXT_COLOR);
+                        }
+                    }
+                }
             }
         }
+
+        const HEALTH_COLORS: [u32; MAX_PLAYER_HEALTH as usize] = [
+            0xFF_10_10_FF,
+            0xFF_10_A0_FF,
+            0xFF_10_FF_10,
+        ];
+        const BAR_WIDTH: usize = 3 * MULT;
+        const BAR_STEP: usize = BAR_WIDTH + 1;
+        let health_bar_start = health_string_start + (BM.width as usize) * MULT + BAR_STEP;
+        let default_bar_color;
+        if let Some(bar_color) = HEALTH_COLORS.get((self.player.health - 1) as usize) {
+            default_bar_color = *bar_color;
+        } else {
+            default_bar_color = 0xFF_FF_FF_FF;
+        }
+        for row_idx in 0..(BM.height as usize * MULT) {
+            let buffer_start = health_bar_start + row_idx * WIDTH * MULT;
+            for bar_idx in 0..MAX_PLAYER_HEALTH as usize {
+                let color;
+                if (bar_idx as i32) < self.player.health {
+                    color = default_bar_color;
+                } else {
+                    color = 0xFF_FF_FF_FF;
+                }
+                let ind0 = buffer_start + bar_idx * BAR_STEP;
+                if let Some(x) = js_buffer.get_mut(ind0..ind0+BAR_WIDTH) {
+                    x.fill(color);
+                }
+
+            }
+        }
+    }
+
+    fn render_status_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
+        self.render_health_bar(js_buffer);
     }
 
     fn draw_start_screen(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
