@@ -76,7 +76,7 @@ enum Tile {
     Player,
     Bullet,
     Obstacle,
-    Enemy(i8),
+    Enemy(u8),
 }
 const DEFAULT_TILE: Tile = Tile::Background;
 const ENEMY_SPEED: u8 = 1;
@@ -85,6 +85,7 @@ struct Enemy {
     x: u8,
     y: u8,
     health: i8,
+    max_health: u8,
 }
 
 enum BulletStatus {
@@ -200,7 +201,7 @@ impl Game<'_> {
             let y = (enemy_step * (row_idx + 1)) as u8;
             for col_idx in 0..n_enemy_in_row {
                 let x = (enemy_step / 2 + col_idx * enemy_step) as u8;
-                self.enemies.push_back(Enemy { x, y, health: 2 });
+                self.enemies.push_back(Enemy { x, y, health: 2, max_health: 2 });
             }
         }
 
@@ -367,7 +368,10 @@ impl Game<'_> {
                 },
                 Tile::Bullet => 0xFF_80_80_80,
                 Tile::Obstacle => 0xFF_E0_E0_E0,
-                Tile::Enemy(val) => 0xFF_00_00_00 | ((*val as u32) << 22) | ((*val as u32) << 14) | ((*val as u32) << 6),
+                Tile::Enemy(val) => {
+                    let color = *val as u32;
+                    0xFF_00_00_00 | color.wrapping_shl(16) | color.wrapping_shl(8) | color
+                }
             };
             let buffer_row = idx / WIDTH;
             let buffer_col = idx % WIDTH;
@@ -513,7 +517,9 @@ impl Player {
 
 impl Enemy {
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
-        let enemy_tile = Tile::Enemy(self.health);
+        let max_health = if self.max_health == 0 { 1 } else { self.max_health as u32 };
+        let color = 255 * (100 - (self.health as u32 * 100 / max_health));
+        let enemy_tile = Tile::Enemy(color as u8);
         let x0 = self.x as u32 - ENEMY_BITMAP.width / 2;
         let y0 = self.y as u32 - ENEMY_BITMAP.height / 2;
         for (row_idx, &row) in ENEMY_BITMAP.bitmap.iter().enumerate() {
