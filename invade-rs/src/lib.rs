@@ -67,6 +67,7 @@ struct Player {
     color: u32,
     health: i32,
     last_shot_in_ticks: u32,
+    opacity: u32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -145,7 +146,7 @@ pub unsafe extern fn js_game_init() {
     let game = static_allocator::static_alloc::<Game>();
     game.default_color = 0xFF_FF_FF_FF;
     game.game_state = GameState::StartScreen;
-    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH, last_shot_in_ticks: 0 };
+    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH, last_shot_in_ticks: 0, opacity: 100 };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
     game.moving_right = true;
@@ -308,6 +309,7 @@ impl Game<'_> {
                 match bullet.status {
                     BulletStatus::HitPlayer => {
                         self.player.health -= 1;
+                        self.player.opacity = 10;
                     },
                     BulletStatus::HitEnemy => {
                         for (enemy_idx, enemy) in self.enemies.iter().enumerate() {
@@ -348,13 +350,21 @@ impl Game<'_> {
             self.game_state = GameState::EndScreen(false);
         }
 
+        if self.player.opacity < 100 {
+            self.player.opacity += 1;
+        }
+
     }
 
     fn render(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
         for (idx, tile) in self.buffer.iter().enumerate() {
             let color = match tile {
                 Tile::Background => self.default_color,
-                Tile::Player => self.player.color,
+                Tile::Player => {
+                    let opacity_hex = (100 - self.player.opacity) * 255 / 100;
+                    let mask = opacity_hex.wrapping_shl(16) | opacity_hex.wrapping_shl(8) | opacity_hex;
+                    self.player.color | mask
+                },
                 Tile::Bullet => 0xFF_80_80_80,
                 Tile::Obstacle => 0xFF_E0_E0_E0,
                 Tile::Enemy(val) => 0xFF_00_00_00 | ((*val as u32) << 22) | ((*val as u32) << 14) | ((*val as u32) << 6),
