@@ -10,6 +10,7 @@ const BUFFER_SIZE: usize = WIDTH * MULT * (HEIGHT + STATUS_BAR_HEIGHT) * MULT;
 const MAX_BULLETS: usize = 128;
 const MAX_ENEMIES: usize = 16;
 const MAX_PLAYER_HEALTH: i32 = 3;
+const FONT_SIZE: u32 = 5;
 
 #[no_mangle]
 static mut BUFFER: [u32; BUFFER_SIZE] = [0; BUFFER_SIZE];
@@ -389,31 +390,9 @@ impl Game<'_> {
 
     fn render_health_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
         const TXT_COLOR: u32 = 0xFF_00_00_00;
-        const BM: Bitmap2D = Bitmap2D { width: 11, height: 5,
-        bitmap: &[
-            0b1001011110000000,
-            0b1001010010000000,
-            0b1111011110100000,
-            0b1001010000000000,
-            0b1001010000100000,
-        ] };
 
         let health_string_start = (HEIGHT + 1) * MULT * WIDTH * MULT;
-
-        for (row_idx, &row) in BM.bitmap.iter().enumerate() {
-            let buffer_start = health_string_start + row_idx * WIDTH * MULT * MULT;
-            for bit_idx in 0..16 {
-                if row & (1 << (16 - bit_idx)) != 0 {
-                    let ind0 = buffer_start + bit_idx*MULT;
-                    for i in 0..MULT {
-                        let ind0 = ind0 + i*WIDTH*MULT;
-                        if let Some(x) = js_buffer.get_mut(ind0..ind0+MULT) {
-                            x.fill(TXT_COLOR);
-                        }
-                    }
-                }
-            }
-        }
+        let health_string_end = self.render_text(js_buffer, "HP:", health_string_start, 1, TXT_COLOR);
 
         const HEALTH_COLORS: [u32; MAX_PLAYER_HEALTH as usize] = [
             0xFF_10_10_FF,
@@ -422,14 +401,14 @@ impl Game<'_> {
         ];
         const BAR_WIDTH: usize = 3 * MULT;
         const BAR_STEP: usize = BAR_WIDTH + 1;
-        let health_bar_start = health_string_start + (BM.width as usize) * MULT + BAR_STEP;
+        let health_bar_start = health_string_end + BAR_STEP;
         let default_bar_color;
         if let Some(bar_color) = HEALTH_COLORS.get((self.player.health - 1) as usize) {
             default_bar_color = *bar_color;
         } else {
             default_bar_color = 0xFF_FF_FF_FF;
         }
-        for row_idx in 0..(BM.height as usize * MULT) {
+        for row_idx in 0..(FONT_SIZE as usize * MULT) {
             let buffer_start = health_bar_start + row_idx * WIDTH * MULT;
             for bar_idx in 0..MAX_PLAYER_HEALTH as usize {
                 let color;
@@ -451,9 +430,124 @@ impl Game<'_> {
         self.render_health_bar(js_buffer);
     }
 
+    fn render_text(&self, js_buffer: &mut [u32; BUFFER_SIZE], text: &str, start_pos: usize, scale: usize, color: u32) -> usize {
+        let mut pos = start_pos;
+        for c in text.chars() {
+            pos = self.render_char(js_buffer, c, pos, scale, color);
+        }
+        return pos
+    }
+
+    fn render_char(&self, js_buffer: &mut [u32; BUFFER_SIZE], c: char, start_pos: usize, scale: usize, color: u32) -> usize {
+        let bm: Bitmap2D = match c {
+            'A' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                        ] },
+            'C' => Bitmap2D { width: 3, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1110000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1110000000000000,
+                        ] },
+            'E' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1110000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                        ] },
+            'H' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                        ] },
+            'O' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                        ] },
+            'P' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                        ] },
+            'R' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1010000000000000,
+                            0b1001000000000000,
+                        ] },
+            'S' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                            0b0001000000000000,
+                            0b1111000000000000,
+                        ] },
+            'T' => Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111100000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                        ] },
+            ':' => Bitmap2D { width: 1, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0000000000000000,
+                            0b0000000000000000,
+                            0b1000000000000000,
+                            0b0000000000000000,
+                            0b1000000000000000,
+                        ] },
+            ' ' => return start_pos + 3 * MULT * scale,
+            _ => return start_pos
+        };
+
+        //TODO: scale is not working properly for values != 1
+
+        for (row_idx, &row) in bm.bitmap.iter().enumerate() {
+            let buffer_start = start_pos + row_idx * WIDTH * MULT * MULT * scale;
+            for bit_idx in 0..16 {
+                if row & (1 << (16 - bit_idx)) != 0 {
+                    let ind0 = buffer_start + bit_idx*MULT*scale;
+                    for i in 0..MULT*scale {
+                        let ind0 = ind0 + i*WIDTH*MULT*scale;
+                        if let Some(x) = js_buffer.get_mut(ind0..ind0+MULT*scale) {
+                            x.fill(color);
+                        }
+                    }
+                }
+            }
+        }
+        return start_pos + (bm.width + 1) as usize * MULT * scale
+    }
+
     fn draw_start_screen(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
-        const START_SCREEN_COLOR: u32 = 0xFF_88_00_00;
-        js_buffer.fill(START_SCREEN_COLOR);
+        const BG_COLOR: u32 = 0xFF_88_88_88;
+        const TXT_COLOR: u32 = 0xFF_00_00_00;
+        js_buffer.fill(BG_COLOR);
+        self.render_text(js_buffer, "PRESS SPACE TO START:", BUFFER_SIZE / 2, 1, TXT_COLOR);
     }
 
     fn draw_end_screen(&self, has_won: bool, js_buffer: &mut [u32; BUFFER_SIZE]) {
