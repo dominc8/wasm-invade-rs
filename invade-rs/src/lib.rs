@@ -472,6 +472,14 @@ impl Game<'_> {
                             0b1001000000000000,
                             0b1001000000000000,
                         ] },
+            'L' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                        ] },
             'O' => Bitmap2D { width: 4, height: FONT_SIZE,
                         bitmap: &[
                             0b1111000000000000,
@@ -512,6 +520,22 @@ impl Game<'_> {
                             0b0010000000000000,
                             0b0010000000000000,
                         ] },
+            'U' => Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                        ] },
+            'Y' => Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b0101000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                        ] },
             ':' => Bitmap2D { width: 1, height: FONT_SIZE,
                         bitmap: &[
                             0b0000000000000000,
@@ -524,15 +548,13 @@ impl Game<'_> {
             _ => return start_pos
         };
 
-        //TODO: scale is not working properly for values != 1
-
         for (row_idx, &row) in bm.bitmap.iter().enumerate() {
             let buffer_start = start_pos + row_idx * WIDTH * MULT * MULT * scale;
             for bit_idx in 0..16 {
                 if row & (1 << (16 - bit_idx)) != 0 {
                     let ind0 = buffer_start + bit_idx*MULT*scale;
                     for i in 0..MULT*scale {
-                        let ind0 = ind0 + i*WIDTH*MULT*scale;
+                        let ind0 = ind0 + i*WIDTH*MULT;
                         if let Some(x) = js_buffer.get_mut(ind0..ind0+MULT*scale) {
                             x.fill(color);
                         }
@@ -547,14 +569,17 @@ impl Game<'_> {
         const BG_COLOR: u32 = 0xFF_88_88_88;
         const TXT_COLOR: u32 = 0xFF_00_00_00;
         js_buffer.fill(BG_COLOR);
-        self.render_text(js_buffer, "PRESS SPACE TO START:", BUFFER_SIZE / 2, 1, TXT_COLOR);
+        self.render_text(js_buffer, "PRESS SPACE TO START", BUFFER_SIZE / 2, 2, TXT_COLOR);
     }
 
     fn draw_end_screen(&self, has_won: bool, js_buffer: &mut [u32; BUFFER_SIZE]) {
         const END_SCREEN_WINNER_COLOR: u32 = 0xFF_00_88_00;
         const END_SCREEN_LOSER_COLOR: u32 = 0xFF_00_00_88;
+        const TXT_COLOR: u32 = 0xFF_00_00_00;
         let color = if has_won { END_SCREEN_WINNER_COLOR } else { END_SCREEN_LOSER_COLOR };
+        let text = if has_won { "YOU WIN" } else { "YOU LOSE" };
         js_buffer.fill(color);
+        self.render_text(js_buffer, text, BUFFER_SIZE / 2 + WIDTH + 40, 2, TXT_COLOR);
     }
 
     fn get_random_u32(&mut self) -> u32 {
