@@ -80,7 +80,7 @@ enum Tile {
     Enemy(u8),
 }
 const DEFAULT_TILE: Tile = Tile::Background;
-const ENEMY_SPEED: u8 = 1;
+const ENEMY_SPEED_FREQ_IN_TICKS: u64 = 1;
 
 struct Enemy {
     x: u8,
@@ -132,7 +132,7 @@ struct Game<'a> {
     enemies: static_allocator::SVector<Enemy>,
     bullets: static_allocator::SVector<Bullet>,
     buffer: &'a mut [Tile; WIDTH * HEIGHT],
-    seconds_since_start: u32,
+    tick_counter: u64,
     moving_right: bool,
 }
 
@@ -151,10 +151,10 @@ pub unsafe extern fn js_game_init() {
     game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH, last_shot_in_ticks: 0, opacity: 100 };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
+    game.tick_counter = 0;
     game.moving_right = true;
     game.buffer = &mut GAMEBUFFER;
 
-    game.seconds_since_start = 0;
     let _ = GAMECELL.set(game);
 }
 
@@ -194,6 +194,7 @@ impl Game<'_> {
         self.enemies.reset();
         self.bullets.reset();
         self.moving_right = true;
+        self.tick_counter = 0;
 
         let enemy_step = 20;
         let n_enemy_in_row = WIDTH / 2 / enemy_step;
@@ -236,6 +237,7 @@ impl Game<'_> {
         else if key_event.pressed_right() { 1 }
         else {0};
 
+        self.tick_counter = self.tick_counter.wrapping_add(1);
         self.player.tick();
         self.player.try_move(player_move_diff * MOVE_SIZE);
         if key_event.pressed_space() {
@@ -248,16 +250,17 @@ impl Game<'_> {
             self.bullets.push_back(Bullet { x: enemy.x, y: enemy.y + (1 + ENEMY_BITMAP.height/2) as u8, speed: 1, status: BulletStatus::Alive });
         }
 
+        let enemy_mov_horz: u8 = if self.tick_counter % ENEMY_SPEED_FREQ_IN_TICKS == 0 { 1 } else { 0 };
         let mut enemy_idx = 0;
         let mut head_x = WIDTH as u8 / 2;
         while let Some(enemy) = self.enemies.get_mut(enemy_idx) {
             if self.moving_right {
-                enemy.x += ENEMY_SPEED;
+                enemy.x += enemy_mov_horz;
                 if enemy.x > head_x {
                     head_x = enemy.x;
                 }
             } else {
-                enemy.x -= ENEMY_SPEED;
+                enemy.x -= enemy_mov_horz;
                 if enemy.x < head_x {
                     head_x = enemy.x;
                 }
@@ -274,7 +277,7 @@ impl Game<'_> {
                 if enemy.y > head_y {
                     head_y = enemy.y;
                 }
-                enemy.y += 4 * ENEMY_SPEED;
+                enemy.y += 4;
                 enemy_idx += 1;
             }
 
@@ -438,6 +441,7 @@ impl Game<'_> {
         return pos
     }
 
+    //TODO: text alignment, extract bitmaps so it is possible to just query it for widths etc
     fn render_char(&self, js_buffer: &mut [u32; BUFFER_SIZE], c: char, start_pos: usize, scale: usize, color: u32) -> usize {
         let bm: Bitmap2D = match c {
             'A' => Bitmap2D { width: 4, height: FONT_SIZE,
@@ -472,6 +476,14 @@ impl Game<'_> {
                             0b1001000000000000,
                             0b1001000000000000,
                         ] },
+            'I' => Bitmap2D { width: 1, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                        ] },
             'L' => Bitmap2D { width: 4, height: FONT_SIZE,
                         bitmap: &[
                             0b1000000000000000,
@@ -479,6 +491,14 @@ impl Game<'_> {
                             0b1000000000000000,
                             0b1000000000000000,
                             0b1111000000000000,
+                        ] },
+            'N' => Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b1100100000000000,
+                            0b1010100000000000,
+                            0b1001100000000000,
+                            0b1000100000000000,
                         ] },
             'O' => Bitmap2D { width: 4, height: FONT_SIZE,
                         bitmap: &[
@@ -527,6 +547,14 @@ impl Game<'_> {
                             0b1001000000000000,
                             0b1001000000000000,
                             0b1111000000000000,
+                        ] },
+            'W' => Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b1000100000000000,
+                            0b1010100000000000,
+                            0b1101100000000000,
+                            0b1000100000000000,
                         ] },
             'Y' => Bitmap2D { width: 5, height: FONT_SIZE,
                         bitmap: &[
@@ -579,7 +607,7 @@ impl Game<'_> {
         let color = if has_won { END_SCREEN_WINNER_COLOR } else { END_SCREEN_LOSER_COLOR };
         let text = if has_won { "YOU WIN" } else { "YOU LOSE" };
         js_buffer.fill(color);
-        self.render_text(js_buffer, text, BUFFER_SIZE / 2 + WIDTH + 40, 2, TXT_COLOR);
+        self.render_text(js_buffer, text, BUFFER_SIZE / 2 + WIDTH, 2, TXT_COLOR);
     }
 
     fn get_random_u32(&mut self) -> u32 {
