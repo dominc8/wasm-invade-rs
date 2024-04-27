@@ -433,6 +433,17 @@ impl Game<'_> {
         self.render_health_bar(js_buffer);
     }
 
+    fn render_text_aligned(&self, js_buffer: &mut [u32; BUFFER_SIZE], text: &str, y: usize, scale: usize, color: u32) -> usize {
+        let mut text_width = 0;
+        for c in text.chars() {
+            let bm = self.get_char_bitmap(c);
+            text_width += (bm.width + 1) as usize * MULT * scale;
+        }
+        let x_offset = (WIDTH * MULT - text_width) / 2;
+        let start_pos = y * WIDTH * MULT + x_offset;
+        self.render_text(js_buffer, text, start_pos, scale, color)
+    }
+
     fn render_text(&self, js_buffer: &mut [u32; BUFFER_SIZE], text: &str, start_pos: usize, scale: usize, color: u32) -> usize {
         let mut pos = start_pos;
         for c in text.chars() {
@@ -441,140 +452,8 @@ impl Game<'_> {
         return pos
     }
 
-    //TODO: text alignment, extract bitmaps so it is possible to just query it for widths etc
     fn render_char(&self, js_buffer: &mut [u32; BUFFER_SIZE], c: char, start_pos: usize, scale: usize, color: u32) -> usize {
-        let bm: Bitmap2D = match c {
-            'A' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111000000000000,
-                            0b1001000000000000,
-                            0b1111000000000000,
-                            0b1001000000000000,
-                            0b1001000000000000,
-                        ] },
-            'C' => Bitmap2D { width: 3, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1110000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1110000000000000,
-                        ] },
-            'E' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111000000000000,
-                            0b1000000000000000,
-                            0b1110000000000000,
-                            0b1000000000000000,
-                            0b1111000000000000,
-                        ] },
-            'H' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1001000000000000,
-                            0b1001000000000000,
-                            0b1111000000000000,
-                            0b1001000000000000,
-                            0b1001000000000000,
-                        ] },
-            'I' => Bitmap2D { width: 1, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                        ] },
-            'L' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                            0b1111000000000000,
-                        ] },
-            'N' => Bitmap2D { width: 5, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1000100000000000,
-                            0b1100100000000000,
-                            0b1010100000000000,
-                            0b1001100000000000,
-                            0b1000100000000000,
-                        ] },
-            'O' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111000000000000,
-                            0b1001000000000000,
-                            0b1001000000000000,
-                            0b1001000000000000,
-                            0b1111000000000000,
-                        ] },
-            'P' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111000000000000,
-                            0b1001000000000000,
-                            0b1111000000000000,
-                            0b1000000000000000,
-                            0b1000000000000000,
-                        ] },
-            'R' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111000000000000,
-                            0b1001000000000000,
-                            0b1111000000000000,
-                            0b1010000000000000,
-                            0b1001000000000000,
-                        ] },
-            'S' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111000000000000,
-                            0b1000000000000000,
-                            0b1111000000000000,
-                            0b0001000000000000,
-                            0b1111000000000000,
-                        ] },
-            'T' => Bitmap2D { width: 5, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1111100000000000,
-                            0b0010000000000000,
-                            0b0010000000000000,
-                            0b0010000000000000,
-                            0b0010000000000000,
-                        ] },
-            'U' => Bitmap2D { width: 4, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1001000000000000,
-                            0b1001000000000000,
-                            0b1001000000000000,
-                            0b1001000000000000,
-                            0b1111000000000000,
-                        ] },
-            'W' => Bitmap2D { width: 5, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1000100000000000,
-                            0b1000100000000000,
-                            0b1010100000000000,
-                            0b1101100000000000,
-                            0b1000100000000000,
-                        ] },
-            'Y' => Bitmap2D { width: 5, height: FONT_SIZE,
-                        bitmap: &[
-                            0b1000100000000000,
-                            0b0101000000000000,
-                            0b0010000000000000,
-                            0b0010000000000000,
-                            0b0010000000000000,
-                        ] },
-            ':' => Bitmap2D { width: 1, height: FONT_SIZE,
-                        bitmap: &[
-                            0b0000000000000000,
-                            0b0000000000000000,
-                            0b1000000000000000,
-                            0b0000000000000000,
-                            0b1000000000000000,
-                        ] },
-            ' ' => return start_pos + 3 * MULT * scale,
-            _ => return start_pos
-        };
+        let bm = self.get_char_bitmap(c);
 
         for (row_idx, &row) in bm.bitmap.iter().enumerate() {
             let buffer_start = start_pos + row_idx * WIDTH * MULT * MULT * scale;
@@ -593,11 +472,155 @@ impl Game<'_> {
         return start_pos + (bm.width + 1) as usize * MULT * scale
     }
 
+    fn get_char_bitmap(&self, c: char) -> &Bitmap2D {
+        match c {
+            'A' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                        ] },
+            'C' => &Bitmap2D { width: 3, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1110000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1110000000000000,
+                        ] },
+            'E' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1110000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                        ] },
+            'H' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                        ] },
+            'I' => &Bitmap2D { width: 1, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                        ] },
+            'L' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                        ] },
+            'N' => &Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b1100100000000000,
+                            0b1010100000000000,
+                            0b1001100000000000,
+                            0b1000100000000000,
+                        ] },
+            'O' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                        ] },
+            'P' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
+                        ] },
+            'R' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b1010000000000000,
+                            0b1001000000000000,
+                        ] },
+            'S' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                            0b0001000000000000,
+                            0b1111000000000000,
+                        ] },
+            'T' => &Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111100000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                        ] },
+            'U' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                        ] },
+            'W' => &Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b1000100000000000,
+                            0b1010100000000000,
+                            0b1101100000000000,
+                            0b1000100000000000,
+                        ] },
+            'Y' => &Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b0101000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                            0b0010000000000000,
+                        ] },
+            ':' => &Bitmap2D { width: 1, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0000000000000000,
+                            0b0000000000000000,
+                            0b1000000000000000,
+                            0b0000000000000000,
+                            0b1000000000000000,
+                        ] },
+            ' ' => &Bitmap2D { width: 2, height: FONT_SIZE,
+                        bitmap: &[
+                        ] },
+            _ => &Bitmap2D { width: 3, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1110000000000000,
+                            0b1110000000000000,
+                            0b1110000000000000,
+                            0b1110000000000000,
+                            0b1110000000000000,
+                        ] },
+        }
+    }
+
     fn draw_start_screen(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
         const BG_COLOR: u32 = 0xFF_88_88_88;
         const TXT_COLOR: u32 = 0xFF_00_00_00;
         js_buffer.fill(BG_COLOR);
-        self.render_text(js_buffer, "PRESS SPACE TO START", BUFFER_SIZE / 2, 2, TXT_COLOR);
+        self.render_text_aligned(js_buffer, "PRESS SPACE TO START", HEIGHT * MULT / 2, 2, TXT_COLOR);
     }
 
     fn draw_end_screen(&self, has_won: bool, js_buffer: &mut [u32; BUFFER_SIZE]) {
@@ -607,7 +630,7 @@ impl Game<'_> {
         let color = if has_won { END_SCREEN_WINNER_COLOR } else { END_SCREEN_LOSER_COLOR };
         let text = if has_won { "YOU WIN" } else { "YOU LOSE" };
         js_buffer.fill(color);
-        self.render_text(js_buffer, text, BUFFER_SIZE / 2 + WIDTH, 2, TXT_COLOR);
+        self.render_text_aligned(js_buffer, text, HEIGHT * MULT / 2, 2, TXT_COLOR);
     }
 
     fn get_random_u32(&mut self) -> u32 {
