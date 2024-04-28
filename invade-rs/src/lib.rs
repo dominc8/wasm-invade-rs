@@ -7,7 +7,7 @@ const WIDTH: usize = 200;
 const HEIGHT: usize = 150;
 const MULT: usize = 6;
 const BUFFER_SIZE: usize = WIDTH * MULT * (HEIGHT + STATUS_BAR_HEIGHT) * MULT;
-const MAX_BULLETS: usize = 128;
+const MAX_BULLETS: usize = 64;
 const MAX_ENEMIES: usize = 16;
 const MAX_PLAYER_HEALTH: i32 = 3;
 const FONT_SIZE: u32 = 5;
@@ -63,12 +63,19 @@ bitmap: &[
     0b0001100110000000,
 ] };
 
+enum Weapon {
+    Pistol,
+    Shotgun,
+}
+
 struct Player {
     pos: i32,
     color: u32,
     health: i32,
     last_shot_in_ticks: u32,
     opacity: u32,
+    weapon: Weapon,
+    just_changed_weapon: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -100,6 +107,7 @@ struct Bullet {
     x: u8,
     y: u8,
     speed: i8,
+    damage: u8,
     status: BulletStatus,
 }
 
@@ -121,6 +129,9 @@ impl KeyEvent {
     }
     fn pressed_space(&self) -> bool {
         (self.0 & 4) != 0
+    }
+    fn pressed_ctrl(&self) -> bool {
+        (self.0 & 8) != 0
     }
 }
 
@@ -148,7 +159,11 @@ pub unsafe extern fn js_game_init() {
     let game = static_allocator::static_alloc::<Game>();
     game.default_color = 0xFF_FF_FF_FF;
     game.game_state = GameState::StartScreen;
-    game.player = Player { pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH, last_shot_in_ticks: 0, opacity: 100 };
+    game.player = Player {
+        pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH,
+        last_shot_in_ticks: 0, opacity: 100, weapon: Weapon::Pistol,
+        just_changed_weapon: false
+    };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
     game.tick_counter = 0;
@@ -240,6 +255,9 @@ impl Game<'_> {
         self.tick_counter = self.tick_counter.wrapping_add(1);
         self.player.tick();
         self.player.try_move(player_move_diff * MOVE_SIZE);
+        if key_event.pressed_ctrl() {
+            self.player.change_weapon();
+        }
         if key_event.pressed_space() {
             if let Some(bullet) = self.player.try_shoot() {
                 self.bullets.push_back(bullet);
@@ -247,7 +265,7 @@ impl Game<'_> {
         }
         let shooting_enemy_idx = self.get_random_u32() % (MAX_ENEMIES as u32 * 4);
         if let Some(enemy) = self.enemies.get(shooting_enemy_idx as usize) {
-            self.bullets.push_back(Bullet { x: enemy.x, y: enemy.y + (1 + ENEMY_BITMAP.height/2) as u8, speed: 1, status: BulletStatus::Alive });
+            self.bullets.push_back(Bullet { x: enemy.x, y: enemy.y + (1 + ENEMY_BITMAP.height/2) as u8, speed: 1, damage: 1, status: BulletStatus::Alive });
         }
 
         let enemy_mov_horz: u8 = if self.tick_counter % ENEMY_SPEED_FREQ_IN_TICKS == 0 { 1 } else { 0 };
@@ -313,7 +331,7 @@ impl Game<'_> {
             if let Some(bullet) = self.bullets.get(idx as usize) {
                 match bullet.status {
                     BulletStatus::HitPlayer => {
-                        self.player.health -= 1;
+                        self.player.health -= bullet.damage as i32;
                         self.player.opacity = 10;
                     },
                     BulletStatus::HitEnemy => {
@@ -324,7 +342,7 @@ impl Game<'_> {
                             let (y_dist, _) = y_dist.overflowing_abs();
                             if x_dist <= ENEMY_BITMAP.width as i32/2 && y_dist <= ENEMY_BITMAP.height as i32/2 {
                                 if let Some(enemy) = self.enemies.get_mut(enemy_idx) {
-                                    enemy.health -= 1;
+                                    enemy.health -= bullet.damage as i8;
                                     break;
                                 }
                             }
@@ -391,10 +409,10 @@ impl Game<'_> {
         self.render_status_bar(js_buffer);
     }
 
-    fn render_health_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
+    fn render_health_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE], offset: usize) -> usize {
         const TXT_COLOR: u32 = 0xFF_00_00_00;
 
-        let health_string_start = (HEIGHT + 1) * MULT * WIDTH * MULT;
+        let health_string_start = offset;
         let health_string_end = self.render_text(js_buffer, "HP:", health_string_start, 1, TXT_COLOR);
 
         const HEALTH_COLORS: [u32; MAX_PLAYER_HEALTH as usize] = [
@@ -405,6 +423,7 @@ impl Game<'_> {
         const BAR_WIDTH: usize = 3 * MULT;
         const BAR_STEP: usize = BAR_WIDTH + 1;
         let health_bar_start = health_string_end + BAR_STEP;
+        let health_bar_end = health_bar_start + MAX_PLAYER_HEALTH as usize * BAR_STEP;
         let default_bar_color;
         if let Some(bar_color) = HEALTH_COLORS.get((self.player.health - 1) as usize) {
             default_bar_color = *bar_color;
@@ -427,10 +446,31 @@ impl Game<'_> {
 
             }
         }
+        return health_bar_end;
+    }
+
+    fn render_weapon_status(&self, js_buffer: &mut [u32; BUFFER_SIZE], offset: usize) -> usize {
+        const TXT_COLOR: u32 = 0xFF_00_00_00;
+
+        let weapon_string_start = offset;
+        let weapon_string = match self.player.weapon {
+            Weapon::Pistol => "PISTOL",
+            Weapon::Shotgun => "SHOTGUN",
+        };
+        let weapon_string_end = self.render_text(js_buffer, weapon_string, weapon_string_start, 1, TXT_COLOR);
+
+        return weapon_string_end;
     }
 
     fn render_status_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
-        self.render_health_bar(js_buffer);
+        let offset = (HEIGHT + 1) * MULT * WIDTH * MULT;
+        if self.player.just_changed_weapon {
+            if let Some(x) = js_buffer.get_mut(offset..) {
+                x.fill(0xFF_FF_FF_FF);
+            }
+        }
+        let offset = self.render_health_bar(js_buffer, offset);
+        let _offset = self.render_weapon_status(js_buffer, offset);
     }
 
     fn render_text_aligned(&self, js_buffer: &mut [u32; BUFFER_SIZE], text: &str, y: usize, scale: usize, color: u32) -> usize {
@@ -496,6 +536,14 @@ impl Game<'_> {
                             0b1000000000000000,
                             0b1110000000000000,
                             0b1000000000000000,
+                            0b1111000000000000,
+                        ] },
+            'G' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1011000000000000,
+                            0b1001000000000000,
                             0b1111000000000000,
                         ] },
             'H' => &Bitmap2D { width: 4, height: FONT_SIZE,
@@ -645,10 +693,21 @@ impl Player {
         self.pos = (WIDTH as i32)/2;
         self.health = 3;
         self.last_shot_in_ticks = 0;
+        self.weapon = Weapon::Pistol;
+        self.just_changed_weapon = false;
     }
 
     fn tick(&mut self) {
         self.last_shot_in_ticks += 1;
+        self.just_changed_weapon = false;
+    }
+
+    fn change_weapon(&mut self) {
+        self.just_changed_weapon = true;
+        self.weapon = match self.weapon {
+            Weapon::Pistol => Weapon::Shotgun,
+            Weapon::Shotgun => Weapon::Pistol,
+        };
     }
 
     fn try_move(&mut self, diff: i32) {
@@ -660,12 +719,18 @@ impl Player {
     }
 
     fn try_shoot(&mut self) -> Option<Bullet> {
-        const SHOT_COOLDOWN: u32 = 30;
-        if self.last_shot_in_ticks < SHOT_COOLDOWN {
+        let (cooldown, damage) = match self.weapon {
+            Weapon::Pistol => (15, 1),
+            Weapon::Shotgun => (30, 2),
+        };
+        if self.last_shot_in_ticks < cooldown {
             return None;
         }
         self.last_shot_in_ticks = 0;
-        return Some(Bullet { x: self.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8, speed: -1, status: BulletStatus::Alive })
+        return Some(Bullet {
+            x: self.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8,
+            speed: -1, damage, status: BulletStatus::Alive
+        })
     }
 
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
