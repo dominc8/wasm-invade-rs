@@ -6,10 +6,11 @@
         async function check(e) {
             keyPressed = 0;
             switch (e.keyCode) {
-                case 37: keyPressed += 1; break; //Left key
-                case 39: keyPressed += 2; break; //Right key
-                case 32: keyPressed += 4; break; //Space key
-                case 17: keyPressed += 8; break; //Ctrl key
+                case 37: keyPressed += 1; break;  //Left key
+                case 39: keyPressed += 2; break;  //Right key
+                case 32: keyPressed += 4; break;  //Space key
+                case 17: keyPressed += 8; break;  //Ctrl key
+                case 27: keyPressed += 16; break; //Escape key
             }
         }
 

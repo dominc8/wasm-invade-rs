@@ -10,6 +10,7 @@ const BUFFER_SIZE: usize = WIDTH * MULT * (HEIGHT + STATUS_BAR_HEIGHT) * MULT;
 const MAX_BULLETS: usize = 64;
 const MAX_ENEMIES: usize = 16;
 const MAX_PLAYER_HEALTH: i32 = 3;
+const MAX_RIFLE_AMMO: i32 = 20;
 const FONT_SIZE: u32 = 5;
 
 #[no_mangle]
@@ -65,7 +66,7 @@ bitmap: &[
 
 enum Weapon {
     Pistol,
-    Shotgun,
+    Rifle,
 }
 
 struct Player {
@@ -75,7 +76,8 @@ struct Player {
     last_shot_in_ticks: u32,
     opacity: u32,
     weapon: Weapon,
-    just_changed_weapon: bool,
+    rifle_ammo: i32,
+    reset_status_bar: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -133,6 +135,9 @@ impl KeyEvent {
     fn pressed_ctrl(&self) -> bool {
         (self.0 & 8) != 0
     }
+    fn pressed_escape(&self) -> bool {
+        (self.0 & 16) != 0
+    }
 }
 
 struct Game<'a> {
@@ -145,6 +150,7 @@ struct Game<'a> {
     buffer: &'a mut [Tile; WIDTH * HEIGHT],
     tick_counter: u64,
     moving_right: bool,
+    paused: bool,
 }
 
 static mut GAMECELL: OnceCell<&mut Game> = OnceCell::new();
@@ -162,12 +168,13 @@ pub unsafe extern fn js_game_init() {
     game.player = Player {
         pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH,
         last_shot_in_ticks: 0, opacity: 100, weapon: Weapon::Pistol,
-        just_changed_weapon: false
+        rifle_ammo: MAX_RIFLE_AMMO, reset_status_bar: false
     };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
     game.tick_counter = 0;
     game.moving_right = true;
+    game.paused = false;
     game.buffer = &mut GAMEBUFFER;
 
     let _ = GAMECELL.set(game);
@@ -177,6 +184,15 @@ pub unsafe extern fn js_game_init() {
 pub unsafe extern fn js_game_tick(key_event_flags: u32) {
     if let Some(game) = GAMECELL.get_mut() {
         let key_event = get_key_event(key_event_flags);
+
+        if key_event.pressed_escape() {
+            game.paused = !game.paused;
+
+            if game.paused {
+                game.draw_help_screen(&mut BUFFER);
+            }
+        }
+        if game.paused { return };
 
         match game.game_state {
             GameState::StartScreen => {
@@ -454,17 +470,49 @@ impl Game<'_> {
 
         let weapon_string_start = offset;
         let weapon_string = match self.player.weapon {
-            Weapon::Pistol => "PISTOL",
-            Weapon::Shotgun => "SHOTGUN",
+            Weapon::Pistol => "PISTOL: ",
+            Weapon::Rifle => "RIFLE: ",
         };
         let weapon_string_end = self.render_text(js_buffer, weapon_string, weapon_string_start, 1, TXT_COLOR);
 
-        return weapon_string_end;
+        let weapon_ammo_start = weapon_string_end;
+        let weapon_ammo_end = match self.player.weapon {
+            Weapon::Pistol => self.render_inf_symbol(js_buffer, weapon_ammo_start, 1, TXT_COLOR),
+            Weapon::Rifle => {
+                // u32 to char array without panic
+                let ammo_string = match self.player.rifle_ammo {
+                    0 => "0/20",
+                    1 => "1/20",
+                    2 => "2/20",
+                    3 => "3/20",
+                    4 => "4/20",
+                    5 => "5/20",
+                    6 => "6/20",
+                    7 => "7/20",
+                    8 => "8/20",
+                    9 => "9/20",
+                    10 => "10/20",
+                    11 => "11/20",
+                    12 => "12/20",
+                    13 => "13/20",
+                    14 => "14/20",
+                    15 => "15/20",
+                    16 => "16/20",
+                    17 => "17/20",
+                    18 => "18/20",
+                    19 => "19/20",
+                    _ => "20/20",
+                };
+                self.render_text(js_buffer, &ammo_string, weapon_ammo_start, 1, TXT_COLOR)
+            }
+        };
+
+        return weapon_ammo_end;
     }
 
     fn render_status_bar(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
         let offset = (HEIGHT + 1) * MULT * WIDTH * MULT;
-        if self.player.just_changed_weapon {
+        if self.player.reset_status_bar {
             if let Some(x) = js_buffer.get_mut(offset..) {
                 x.fill(0xFF_FF_FF_FF);
             }
@@ -512,6 +560,33 @@ impl Game<'_> {
         return start_pos + (bm.width + 1) as usize * MULT * scale
     }
 
+    fn render_inf_symbol(&self, js_buffer: &mut [u32; BUFFER_SIZE], start_pos: usize, scale: usize, color: u32) -> usize {
+        let bm = &Bitmap2D { width: 9, height: FONT_SIZE,
+                    bitmap: &[
+                        0b0110001100000000,
+                        0b1001010010000000,
+                        0b1000100010000000,
+                        0b1001010010000000,
+                        0b0110001100000000,
+                    ] };
+
+        for (row_idx, &row) in bm.bitmap.iter().enumerate() {
+            let buffer_start = start_pos + row_idx * WIDTH * MULT * MULT * scale;
+            for bit_idx in 0..16 {
+                if row & (1 << (16 - bit_idx)) != 0 {
+                    let ind0 = buffer_start + bit_idx*MULT*scale;
+                    for i in 0..MULT*scale {
+                        let ind0 = ind0 + i*WIDTH*MULT;
+                        if let Some(x) = js_buffer.get_mut(ind0..ind0+MULT*scale) {
+                            x.fill(color);
+                        }
+                    }
+                }
+            }
+        }
+        return start_pos + (bm.width + 1) as usize * MULT * scale
+    }
+
     fn get_char_bitmap(&self, c: char) -> &Bitmap2D {
         match c {
             'A' => &Bitmap2D { width: 4, height: FONT_SIZE,
@@ -530,6 +605,14 @@ impl Game<'_> {
                             0b1000000000000000,
                             0b1110000000000000,
                         ] },
+            'D' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1110000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1110000000000000,
+                        ] },
             'E' => &Bitmap2D { width: 4, height: FONT_SIZE,
                         bitmap: &[
                             0b1111000000000000,
@@ -537,6 +620,14 @@ impl Game<'_> {
                             0b1110000000000000,
                             0b1000000000000000,
                             0b1111000000000000,
+                        ] },
+            'F' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1110000000000000,
+                            0b1000000000000000,
+                            0b1000000000000000,
                         ] },
             'G' => &Bitmap2D { width: 4, height: FONT_SIZE,
                         bitmap: &[
@@ -569,6 +660,14 @@ impl Game<'_> {
                             0b1000000000000000,
                             0b1000000000000000,
                             0b1111000000000000,
+                        ] },
+            'M' => &Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1000100000000000,
+                            0b1101100000000000,
+                            0b1010100000000000,
+                            0b1000100000000000,
+                            0b1000100000000000,
                         ] },
             'N' => &Bitmap2D { width: 5, height: FONT_SIZE,
                         bitmap: &[
@@ -642,6 +741,94 @@ impl Game<'_> {
                             0b0010000000000000,
                             0b0010000000000000,
                         ] },
+            '0' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0110000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b1001000000000000,
+                            0b0110000000000000,
+                        ] },
+            '1' => &Bitmap2D { width: 3, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0100000000000000,
+                            0b1100000000000000,
+                            0b0100000000000000,
+                            0b0100000000000000,
+                            0b1110000000000000,
+                        ] },
+            '2' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0110000000000000,
+                            0b1001000000000000,
+                            0b0010000000000000,
+                            0b0100000000000000,
+                            0b1111000000000000,
+                        ] },
+            '3' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0110000000000000,
+                            0b1001000000000000,
+                            0b0010000000000000,
+                            0b1001000000000000,
+                            0b0110000000000000,
+                        ] },
+            '4' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0101000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                            0b0001000000000000,
+                            0b0001000000000000,
+                        ] },
+            '5' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1110000000000000,
+                            0b0001000000000000,
+                            0b1110000000000000,
+                        ] },
+            '6' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b1000000000000000,
+                            0b1111000000000000,
+                            0b1001000000000000,
+                            0b1111000000000000,
+                        ] },
+            '7' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b1111000000000000,
+                            0b0001000000000000,
+                            0b0010000000000000,
+                            0b0100000000000000,
+                            0b0100000000000000,
+                        ] },
+            '8' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0110000000000000,
+                            0b1001000000000000,
+                            0b0110000000000000,
+                            0b1001000000000000,
+                            0b0110000000000000,
+                        ] },
+            '9' => &Bitmap2D { width: 4, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0110000000000000,
+                            0b1001000000000000,
+                            0b0111000000000000,
+                            0b0010000000000000,
+                            0b0100000000000000,
+                        ] },
+            '/' => &Bitmap2D { width: 5, height: FONT_SIZE,
+                        bitmap: &[
+                            0b0000100000000000,
+                            0b0001000000000000,
+                            0b0010000000000000,
+                            0b0100000000000000,
+                            0b1000000000000000,
+                        ] },
             ':' => &Bitmap2D { width: 1, height: FONT_SIZE,
                         bitmap: &[
                             0b0000000000000000,
@@ -669,6 +856,9 @@ impl Game<'_> {
         const TXT_COLOR: u32 = 0xFF_00_00_00;
         js_buffer.fill(BG_COLOR);
         self.render_text_aligned(js_buffer, "PRESS SPACE TO START", HEIGHT * MULT / 2, 2, TXT_COLOR);
+
+        let offset = BUFFER_SIZE - WIDTH * MULT * MULT * (FONT_SIZE  + 1) as usize;
+        self.render_text(js_buffer, "ESC: PAUSE/HELP MENU", offset, 1, TXT_COLOR);
     }
 
     fn draw_end_screen(&self, has_won: bool, js_buffer: &mut [u32; BUFFER_SIZE]) {
@@ -679,6 +869,20 @@ impl Game<'_> {
         let text = if has_won { "YOU WIN" } else { "YOU LOSE" };
         js_buffer.fill(color);
         self.render_text_aligned(js_buffer, text, HEIGHT * MULT / 2, 2, TXT_COLOR);
+    }
+
+    fn draw_help_screen(&self, js_buffer: &mut [u32; BUFFER_SIZE]) {
+        const BG_COLOR: u32 = 0xFF_AA_AA_AA;
+        const TXT_COLOR: u32 = 0xFF_00_00_00;
+        const TXT_SCALE: usize = 2;
+        js_buffer.fill(BG_COLOR);
+        self.render_text_aligned(js_buffer, "GAME PAUSED", HEIGHT * MULT / 6, TXT_SCALE, TXT_COLOR);
+        let offset = (HEIGHT / 3) * MULT * WIDTH * MULT;// + (WIDTH / 4) * MULT;
+        self.render_text(js_buffer, "SHOOT: SPACE", offset, TXT_SCALE, TXT_COLOR);
+        let offset = offset + (FONT_SIZE as usize + 2) * TXT_SCALE * WIDTH * MULT * MULT;
+        self.render_text(js_buffer, "TOGGLE WEAPON: CTRL", offset, TXT_SCALE, TXT_COLOR);
+        let offset = offset + (FONT_SIZE as usize + 2) * TXT_SCALE * WIDTH * MULT * MULT;
+        self.render_text(js_buffer, "PAUSE: ESC", offset, TXT_SCALE, TXT_COLOR);
     }
 
     fn get_random_u32(&mut self) -> u32 {
@@ -694,19 +898,20 @@ impl Player {
         self.health = 3;
         self.last_shot_in_ticks = 0;
         self.weapon = Weapon::Pistol;
-        self.just_changed_weapon = false;
+        self.rifle_ammo = MAX_RIFLE_AMMO;
+        self.reset_status_bar = false;
     }
 
     fn tick(&mut self) {
         self.last_shot_in_ticks += 1;
-        self.just_changed_weapon = false;
+        self.reset_status_bar = false;
     }
 
     fn change_weapon(&mut self) {
-        self.just_changed_weapon = true;
+        self.reset_status_bar = true;
         self.weapon = match self.weapon {
-            Weapon::Pistol => Weapon::Shotgun,
-            Weapon::Shotgun => Weapon::Pistol,
+            Weapon::Pistol => Weapon::Rifle,
+            Weapon::Rifle => Weapon::Pistol,
         };
     }
 
@@ -719,14 +924,18 @@ impl Player {
     }
 
     fn try_shoot(&mut self) -> Option<Bullet> {
-        let (cooldown, damage) = match self.weapon {
-            Weapon::Pistol => (15, 1),
-            Weapon::Shotgun => (30, 2),
+        let (cooldown, damage, has_ammo) = match self.weapon {
+            Weapon::Pistol => (15, 1, true),
+            Weapon::Rifle => (30, 2, self.rifle_ammo > 0),
         };
-        if self.last_shot_in_ticks < cooldown {
+        if !has_ammo || self.last_shot_in_ticks < cooldown {
             return None;
         }
         self.last_shot_in_ticks = 0;
+        match self.weapon {
+            Weapon::Pistol => (),
+            Weapon::Rifle => {self.rifle_ammo -= 1; self.reset_status_bar = true;},
+        };
         return Some(Bullet {
             x: self.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8,
             speed: -1, damage, status: BulletStatus::Alive
