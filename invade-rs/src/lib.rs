@@ -219,6 +219,34 @@ pub unsafe extern fn js_game_tick(key_event_flags: u32) {
     }
 }
 
+fn stringify_u32(val: u32, s: &mut [char]) -> usize {
+    let mut str_len = 0;
+    let slice_len = s.len();
+    let mut val = val;
+    loop {
+        str_len += 1;
+        let digit = match val % 10 {
+            0 => '0',
+            1 => '1',
+            2 => '2',
+            3 => '3',
+            4 => '4',
+            5 => '5',
+            6 => '6',
+            7 => '7',
+            8 => '8',
+            9 => '9',
+            _ => '9',
+        };
+        if let Some(x) = s.get_mut(slice_len - str_len) {
+            *x = digit;
+        }
+        val /= 10;
+        if val == 0 { break };
+    }
+    return str_len;
+}
+
 impl Game<'_> {
     fn reset_level(&mut self) {
         self.player.reset();
@@ -480,30 +508,21 @@ impl Game<'_> {
             Weapon::Pistol => self.render_inf_symbol(js_buffer, weapon_ammo_start, 1, TXT_COLOR),
             Weapon::Rifle => {
                 // u32 to char array without panic
-                let ammo_string = match self.player.rifle_ammo {
-                    0 => "0/20",
-                    1 => "1/20",
-                    2 => "2/20",
-                    3 => "3/20",
-                    4 => "4/20",
-                    5 => "5/20",
-                    6 => "6/20",
-                    7 => "7/20",
-                    8 => "8/20",
-                    9 => "9/20",
-                    10 => "10/20",
-                    11 => "11/20",
-                    12 => "12/20",
-                    13 => "13/20",
-                    14 => "14/20",
-                    15 => "15/20",
-                    16 => "16/20",
-                    17 => "17/20",
-                    18 => "18/20",
-                    19 => "19/20",
-                    _ => "20/20",
-                };
-                self.render_text(js_buffer, &ammo_string, weapon_ammo_start, 1, TXT_COLOR)
+                const MAX_AMMO_STR_LEN: usize = 16;
+                let mut available_ammo_str: [char; MAX_AMMO_STR_LEN] = ['0'; MAX_AMMO_STR_LEN];
+                let mut str_len = stringify_u32(MAX_RIFLE_AMMO as u32, &mut available_ammo_str);
+                if let Some(x) = available_ammo_str.get_mut(MAX_AMMO_STR_LEN - str_len - 1) {
+                    *x = '/';
+                }
+                str_len += 1;
+                if let Some(x) = available_ammo_str.get_mut(0..MAX_AMMO_STR_LEN - str_len) {
+                    str_len += stringify_u32(self.player.rifle_ammo as u32, x);
+                }
+                if let Some(x) = available_ammo_str.get(MAX_AMMO_STR_LEN - str_len..) {
+                    self.render_char_arr(js_buffer, x, weapon_ammo_start, 1, TXT_COLOR)
+                } else {
+                    self.render_text(js_buffer, "0/0", weapon_ammo_start, 1, TXT_COLOR)
+                }
             }
         };
 
@@ -536,6 +555,14 @@ impl Game<'_> {
         let mut pos = start_pos;
         for c in text.chars() {
             pos = self.render_char(js_buffer, c, pos, scale, color);
+        }
+        return pos
+    }
+
+    fn render_char_arr(&self, js_buffer: &mut [u32; BUFFER_SIZE], text: &[char], start_pos: usize, scale: usize, color: u32) -> usize {
+        let mut pos = start_pos;
+        for c in text {
+            pos = self.render_char(js_buffer, *c, pos, scale, color);
         }
         return pos
     }
