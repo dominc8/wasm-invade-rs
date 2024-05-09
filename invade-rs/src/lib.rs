@@ -10,7 +10,8 @@ const BUFFER_SIZE: usize = WIDTH * MULT * (HEIGHT + STATUS_BAR_HEIGHT) * MULT;
 const MAX_BULLETS: usize = 64;
 const MAX_ENEMIES: usize = 16;
 const MAX_PLAYER_HEALTH: i32 = 3;
-const MAX_RIFLE_AMMO: i32 = 20;
+const MAX_RIFLE_AMMO: i32 = 10;
+const MAX_SHOTGUN_AMMO: i32 = 10;
 const FONT_SIZE: u32 = 5;
 
 #[no_mangle]
@@ -64,9 +65,11 @@ bitmap: &[
     0b0001100110000000,
 ] };
 
+#[derive(Eq, PartialEq)]
 enum Weapon {
     Pistol,
     Rifle,
+    Shotgun,
 }
 
 struct Player {
@@ -77,6 +80,7 @@ struct Player {
     opacity: u32,
     weapon: Weapon,
     rifle_ammo: i32,
+    shotgun_ammo: i32,
     reset_status_bar: bool,
 }
 
@@ -168,7 +172,8 @@ pub unsafe extern fn js_game_init() {
     game.player = Player {
         pos: (WIDTH as i32)/2, color: 0xFF_00_00_FF, health: MAX_PLAYER_HEALTH,
         last_shot_in_ticks: 0, opacity: 100, weapon: Weapon::Pistol,
-        rifle_ammo: MAX_RIFLE_AMMO, reset_status_bar: false
+        rifle_ammo: MAX_RIFLE_AMMO, shotgun_ammo: MAX_SHOTGUN_AMMO,
+        reset_status_bar: false
     };
     game.enemies = static_allocator::SVector::new(MAX_ENEMIES);
     game.bullets = static_allocator::SVector::new(MAX_BULLETS);
@@ -303,9 +308,7 @@ impl Game<'_> {
             self.player.change_weapon();
         }
         if key_event.pressed_space() {
-            if let Some(bullet) = self.player.try_shoot() {
-                self.bullets.push_back(bullet);
-            }
+            self.player.try_shoot(&mut self.bullets);
         }
         let shooting_enemy_idx = self.get_random_u32() % (MAX_ENEMIES as u32 * 4);
         if let Some(enemy) = self.enemies.get(shooting_enemy_idx as usize) {
@@ -500,6 +503,7 @@ impl Game<'_> {
         let weapon_string = match self.player.weapon {
             Weapon::Pistol => "PISTOL: ",
             Weapon::Rifle => "RIFLE: ",
+            Weapon::Shotgun => "SHOTGUN: ",
         };
         let weapon_string_end = self.render_text(js_buffer, weapon_string, weapon_string_start, 1, TXT_COLOR);
 
@@ -517,6 +521,24 @@ impl Game<'_> {
                 str_len += 1;
                 if let Some(x) = available_ammo_str.get_mut(0..MAX_AMMO_STR_LEN - str_len) {
                     str_len += stringify_u32(self.player.rifle_ammo as u32, x);
+                }
+                if let Some(x) = available_ammo_str.get(MAX_AMMO_STR_LEN - str_len..) {
+                    self.render_char_arr(js_buffer, x, weapon_ammo_start, 1, TXT_COLOR)
+                } else {
+                    self.render_text(js_buffer, "0/0", weapon_ammo_start, 1, TXT_COLOR)
+                }
+            },
+                Weapon::Shotgun => {
+                // u32 to char array without panic
+                const MAX_AMMO_STR_LEN: usize = 16;
+                let mut available_ammo_str: [char; MAX_AMMO_STR_LEN] = ['0'; MAX_AMMO_STR_LEN];
+                let mut str_len = stringify_u32(MAX_SHOTGUN_AMMO as u32, &mut available_ammo_str);
+                if let Some(x) = available_ammo_str.get_mut(MAX_AMMO_STR_LEN - str_len - 1) {
+                    *x = '/';
+                }
+                str_len += 1;
+                if let Some(x) = available_ammo_str.get_mut(0..MAX_AMMO_STR_LEN - str_len) {
+                    str_len += stringify_u32(self.player.shotgun_ammo as u32, x);
                 }
                 if let Some(x) = available_ammo_str.get(MAX_AMMO_STR_LEN - str_len..) {
                     self.render_char_arr(js_buffer, x, weapon_ammo_start, 1, TXT_COLOR)
@@ -907,7 +929,7 @@ impl Game<'_> {
         let offset = (HEIGHT / 3) * MULT * WIDTH * MULT;// + (WIDTH / 4) * MULT;
         self.render_text(js_buffer, "SHOOT: SPACE", offset, TXT_SCALE, TXT_COLOR);
         let offset = offset + (FONT_SIZE as usize + 2) * TXT_SCALE * WIDTH * MULT * MULT;
-        self.render_text(js_buffer, "TOGGLE WEAPON: CTRL", offset, TXT_SCALE, TXT_COLOR);
+        self.render_text(js_buffer, "CHANGE WEAPON: CTRL", offset, TXT_SCALE, TXT_COLOR);
         let offset = offset + (FONT_SIZE as usize + 2) * TXT_SCALE * WIDTH * MULT * MULT;
         self.render_text(js_buffer, "PAUSE: ESC", offset, TXT_SCALE, TXT_COLOR);
     }
@@ -926,6 +948,7 @@ impl Player {
         self.last_shot_in_ticks = 0;
         self.weapon = Weapon::Pistol;
         self.rifle_ammo = MAX_RIFLE_AMMO;
+        self.shotgun_ammo = MAX_SHOTGUN_AMMO;
         self.reset_status_bar = false;
     }
 
@@ -938,7 +961,8 @@ impl Player {
         self.reset_status_bar = true;
         self.weapon = match self.weapon {
             Weapon::Pistol => Weapon::Rifle,
-            Weapon::Rifle => Weapon::Pistol,
+            Weapon::Rifle => Weapon::Shotgun,
+            Weapon::Shotgun => Weapon::Pistol,
         };
     }
 
@@ -950,23 +974,44 @@ impl Player {
         }
     }
 
-    fn try_shoot(&mut self) -> Option<Bullet> {
+    fn try_shoot(&mut self, bullets: &mut static_allocator::SVector<Bullet>) {
         let (cooldown, damage, has_ammo) = match self.weapon {
             Weapon::Pistol => (15, 1, true),
             Weapon::Rifle => (30, 2, self.rifle_ammo > 0),
+            Weapon::Shotgun => (30, 1, self.shotgun_ammo > 0),
         };
         if !has_ammo || self.last_shot_in_ticks < cooldown {
-            return None;
+            return;
         }
         self.last_shot_in_ticks = 0;
         match self.weapon {
             Weapon::Pistol => (),
             Weapon::Rifle => {self.rifle_ammo -= 1; self.reset_status_bar = true;},
+            Weapon::Shotgun => {self.shotgun_ammo -= 1; self.reset_status_bar = true;},
         };
-        return Some(Bullet {
-            x: self.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8,
-            speed: -1, damage, status: BulletStatus::Alive
-        })
+        if self.weapon == Weapon::Shotgun {
+            let x0 = self.pos as u32 - PLAYER_BITMAP.width / 4;
+            let x1 = self.pos as u32 + PLAYER_BITMAP.width / 4;
+            bullets.push_back(
+                Bullet {
+                    x: x0 as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8,
+                    speed: -1, damage, status: BulletStatus::Alive
+                }
+            );
+            bullets.push_back(
+                Bullet {
+                    x: x1 as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8,
+                    speed: -1, damage, status: BulletStatus::Alive
+                }
+            );
+        } else {
+            bullets.push_back(
+                Bullet {
+                    x: self.pos as u8, y: (HEIGHT as u32 - PLAYER_BITMAP.height - 1) as u8,
+                    speed: -1, damage, status: BulletStatus::Alive
+                }
+            );
+        }
     }
 
     fn update(&self, buffer: &mut [Tile; WIDTH * HEIGHT]) {
