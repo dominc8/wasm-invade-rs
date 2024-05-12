@@ -4,13 +4,12 @@
     <script type="module">
         let keyPressed = 0;
         async function check(e) {
-            keyPressed = 0;
             switch (e.keyCode) {
-                case 37: keyPressed += 1; break;  //Left key
-                case 39: keyPressed += 2; break;  //Right key
-                case 32: keyPressed += 4; break;  //Space key
-                case 17: keyPressed += 8; break;  //Ctrl key
-                case 27: keyPressed += 16; break; //Escape key
+                case 37: keyPressed |= 1; break;  //Left key
+                case 39: keyPressed |= 2; break;  //Right key
+                case 32: keyPressed |= 4; break;  //Space key
+                case 17: keyPressed |= 8; break;  //Ctrl key
+                case 27: keyPressed |= 16; break; //Escape key
             }
         }
 
@@ -38,19 +37,27 @@
         );
 
         const ctx = canvas.getContext("2d");
-        //let previous_timestamp = document.timeline.currentTime;
-        //const tick_value_in_ms = 50;
-        //let current_tick_value = tick_value_in_ms;
+        let previous_timestamp = document.timeline.currentTime;
+        const tick_value_in_ms = 30;
+        let current_tick_value = 0;
 
-        const render = () => {
-            instance.exports.js_game_tick(keyPressed);
-            keyPressed = 0;
-            ctx.putImageData(image, 0, 0);
+        const render = (timestamp) => {
+            current_tick_value += (timestamp - previous_timestamp);
+            previous_timestamp = timestamp;
+            if (current_tick_value > tick_value_in_ms) {
+                const n_tick = Math.floor(current_tick_value / tick_value_in_ms);
+                for(let i = 0; i < n_tick; ++i) {
+                    instance.exports.js_game_tick(keyPressed);
+                    keyPressed = 0;
+                }
+                ctx.putImageData(image, 0, 0);
+                current_tick_value -= n_tick * tick_value_in_ms;
+            }
             requestAnimationFrame(render);
         };
 
         instance.exports.js_game_init();
-        render();
+        render(previous_timestamp);
         window.addEventListener('keydown', check, false);
       }
 
